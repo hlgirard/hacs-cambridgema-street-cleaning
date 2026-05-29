@@ -39,12 +39,38 @@ The integration creates a sensor entity with:
 
 | Property | Description |
 |----------|-------------|
-| **State** | Next sweeping date (ISO format, e.g. `2026-06-01`) or `None` if outside Cambridge |
+| **State** | Next sweeping date (e.g. `2026-06-01`) or unavailable if outside Cambridge / schedule expired |
 | `district` | Sweeping district letter (A-K) |
 | `side` | `odd` or `even` (based on nearest street number) |
 | `nearest_address` | Closest Cambridge address to GPS position |
 | `next_sweep_formatted` | Human-readable date (e.g. "Monday, June 01, 2026") |
 | `in_cambridge` | Whether the vehicle is currently in Cambridge |
+| `schedule_expired` | `True` when the hardcoded calendar has no future dates |
+
+The sensor uses `device_class: date` so tile cards render it as a friendly date. The icon switches from `mdi:broom` (green) to `mdi:alert` (orange) when the schedule is expired.
+
+## Dashboard card
+
+A simple tile card works out of the box:
+
+```yaml
+type: tile
+entity: sensor.next_street_sweeping
+```
+
+To conditionally color the tile based on schedule state, use a [card-mod](https://github.com/thomasloven/lovelace-card-mod) style or a conditional card:
+
+```yaml
+type: conditional
+conditions:
+  - condition: state
+    entity: sensor.next_street_sweeping
+    state_not: unavailable
+card:
+  type: tile
+  entity: sensor.next_street_sweeping
+  color: green
+```
 
 ## Update behavior
 
@@ -54,7 +80,7 @@ The integration creates a sensor entity with:
 
 ## Schedule data
 
-The 2026 schedule is sourced from the [City of Cambridge DPW](https://www.cambridgema.gov/services/streetcleaning). When the schedule expires (all dates passed), the sensor state becomes `schedule_expired` with a warning attribute.
+The 2026 schedule is sourced from the [City of Cambridge DPW](https://www.cambridgema.gov/services/streetcleaning). When the schedule expires (all dates passed), the sensor becomes unavailable with a `schedule_expired: True` attribute and the icon switches to a warning indicator.
 
 ## Data sources
 

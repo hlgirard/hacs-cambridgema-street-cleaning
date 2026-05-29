@@ -1,12 +1,14 @@
 """Sensor platform for Cambridge Street Sweeping."""
 
-from homeassistant.components.sensor import SensorEntity
+from datetime import date
+
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_DEVICE_TRACKER, DOMAIN
+from .const import CONF_DEVICE_TRACKER
 from .coordinator import SweepingCoordinator, SweepingData
 
 
@@ -26,7 +28,7 @@ class CambridgeSweepingSensor(CoordinatorEntity[SweepingCoordinator], SensorEnti
 
     _attr_has_entity_name = True
     _attr_name = "Next Street Sweeping"
-    _attr_icon = "mdi:broom"
+    _attr_device_class = SensorDeviceClass.DATE
 
     def __init__(self, coordinator: SweepingCoordinator, entry: ConfigEntry) -> None:
         """Initialize."""
@@ -34,15 +36,26 @@ class CambridgeSweepingSensor(CoordinatorEntity[SweepingCoordinator], SensorEnti
         self._attr_unique_id = f"{entry.entry_id}_next_sweep"
 
     @property
-    def native_value(self) -> str | None:
-        """Return the next sweeping date as ISO string, or None."""
+    def native_value(self) -> date | None:
+        """Return the next sweeping date, or None."""
         data: SweepingData = self.coordinator.data
         if not data.in_cambridge:
             return None
         if data.schedule_expired:
-            return "schedule_expired"
-        if data.next_date:
-            return data.next_date.isoformat()
+            return None
+        return data.next_date
+
+    @property
+    def icon(self) -> str:
+        """Return icon based on state."""
+        data: SweepingData = self.coordinator.data
+        if data.schedule_expired:
+            return "mdi:alert"
+        return "mdi:broom"
+
+    @property
+    def entity_picture(self) -> str | None:
+        """Not used — rely on icon instead."""
         return None
 
     @property
@@ -54,11 +67,8 @@ class CambridgeSweepingSensor(CoordinatorEntity[SweepingCoordinator], SensorEnti
             "side": data.side,
             "nearest_address": data.nearest_address,
             "in_cambridge": str(data.in_cambridge),
+            "schedule_expired": str(data.schedule_expired),
         }
         if data.next_date:
             attrs["next_sweep_formatted"] = data.next_date.strftime("%A, %B %d, %Y")
-        if data.schedule_expired:
-            attrs["warning"] = (
-                f"All {DOMAIN} schedule dates have passed. Update the schedule data."
-            )
         return attrs
