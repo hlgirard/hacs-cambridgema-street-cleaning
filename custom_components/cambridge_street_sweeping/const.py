@@ -6,16 +6,16 @@ DOMAIN = "cambridge_street_sweeping"
 
 CONF_DEVICE_TRACKER = "device_tracker_entity"
 
-MASTER_ADDRESS_URL = (
-    "https://services1.arcgis.com/WnzC35krSYGuYov4/arcgis/rest/services/"
-    "Master_Address_List_New/FeatureServer/0/query"
-)
+NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
 
-SPATIAL_QUERY_RADIUS_METERS = 50
+SWEEPING_DISTRICTS_URL = (
+    "https://services1.arcgis.com/WnzC35krSYGuYov4/arcgis/rest/services/"
+    "Street_Sweeping_Districts/FeatureServer/0/query"
+)
 
 UPDATE_INTERVAL_MINUTES = 30
 
-# Minimum distance (meters) the car must move before we re-query the API.
+# Minimum distance (meters) the car must move before we re-query the APIs.
 MIN_MOVEMENT_METERS = 50
 
 SCHEDULE_YEAR = 2026

@@ -12,9 +12,9 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .const import (
     DOMAIN,
-    MASTER_ADDRESS_URL,
     MIN_MOVEMENT_METERS,
-    SPATIAL_QUERY_RADIUS_METERS,
+    NOMINATIM_URL,
+    SWEEPING_DISTRICTS_URL,
     UPDATE_INTERVAL_MINUTES,
     get_next_sweep_date,
 )
@@ -44,28 +44,77 @@ def _haversine_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> flo
     return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
-def _query_nearest_address(lat: float, lon: float) -> dict | None:
-    """Query Cambridge Master Address List for the nearest address to a GPS point."""
+def _reverse_geocode_nominatim(lat: float, lon: float) -> dict | None:
+    """Reverse geocode via Nominatim to get street address and house number."""
+    params = {
+        "lat": lat,
+        "lon": lon,
+        "format": "json",
+        "addressdetails": 1,
+        "zoom": 18,
+    }
+    headers = {"User-Agent": "CambridgeStreetSweepingHA/0.1"}
+    resp = requests.get(NOMINATIM_URL, params=params, headers=headers, timeout=10)
+    resp.raise_for_status()
+    data = resp.json()
+
+    address = data.get("address", {})
+    city = address.get("city", "")
+    if "cambridge" not in city.lower():
+        return None
+
+    house_number_raw = address.get("house_number", "")
+    # Nominatim may return "76;78" for interpolated addresses — take the first
+    house_number = house_number_raw.split(";")[0].strip()
+    road = address.get("road", "")
+
+    if not house_number or not house_number.isdigit():
+        return None
+
+    return {
+        "house_number": int(house_number),
+        "road": road,
+        "display": f"{house_number} {road}",
+    }
+
+
+def _query_sweep_district(lat: float, lon: float) -> str | None:
+    """Query Cambridge Street Sweeping Districts layer for the district at a point."""
     params = {
         "geometry": f"{lon},{lat}",
         "geometryType": "esriGeometryPoint",
         "spatialRel": "esriSpatialRelIntersects",
-        "distance": SPATIAL_QUERY_RADIUS_METERS,
-        "units": "esriSRUnit_Meter",
-        "inSR": 4326,
-        "outFields": "Full_Addr,Sweep_District,StNm",
+        "outFields": "District",
         "returnGeometry": "false",
-        "resultRecordCount": 1,
         "f": "json",
+        "inSR": 4326,
     }
-    resp = requests.get(MASTER_ADDRESS_URL, params=params, timeout=15)
+    resp = requests.get(SWEEPING_DISTRICTS_URL, params=params, timeout=10)
     resp.raise_for_status()
     data = resp.json()
 
     features = data.get("features", [])
     if not features:
         return None
-    return features[0]["attributes"]
+    return features[0]["attributes"].get("District")
+
+
+def _resolve_location(lat: float, lon: float) -> tuple[str | None, str | None, int | None]:
+    """
+    Resolve GPS to (district, display_address, house_number).
+
+    Uses Nominatim for street/side and Cambridge Districts layer for district.
+    Returns (None, None, None) if not in Cambridge.
+    """
+    district = _query_sweep_district(lat, lon)
+    if district is None:
+        return None, None, None
+
+    nominatim = _reverse_geocode_nominatim(lat, lon)
+    if nominatim is None:
+        return district, None, None
+
+    return district, nominatim["display"], nominatim["house_number"]
 
 
 class SweepingCoordinator(DataUpdateCoordinator[SweepingData]):
@@ -85,7 +134,7 @@ class SweepingCoordinator(DataUpdateCoordinator[SweepingData]):
         self._cached_data: SweepingData = SweepingData()
 
     async def _async_update_data(self) -> SweepingData:
-        """Fetch data from the device tracker and query the API."""
+        """Fetch data from the device tracker and query the APIs."""
         state = self.hass.states.get(self._entity_id)
         if state is None:
             return SweepingData()
@@ -98,55 +147,55 @@ class SweepingCoordinator(DataUpdateCoordinator[SweepingData]):
         if self._last_lat is not None and self._last_lon is not None:
             distance = _haversine_meters(self._last_lat, self._last_lon, lat, lon)
             if distance < MIN_MOVEMENT_METERS:
-                # Re-compute next_date in case a day has passed, but skip the API call
-                if self._cached_data.in_cambridge and self._cached_data.district:
-                    street_num = self._street_number_from_address(
-                        self._cached_data.nearest_address
-                    )
-                    if street_num is not None:
-                        next_dt = get_next_sweep_date(
-                            self._cached_data.district, street_num
-                        )
-                        self._cached_data.next_date = next_dt
-                        self._cached_data.schedule_expired = next_dt is None
+                self._refresh_next_date()
                 return self._cached_data
 
         self._last_lat = lat
         self._last_lon = lon
 
         try:
-            result = await self.hass.async_add_executor_job(
-                _query_nearest_address, lat, lon
+            district, address, house_number = await self.hass.async_add_executor_job(
+                _resolve_location, lat, lon
             )
         except requests.RequestException as err:
-            raise UpdateFailed(f"Error querying Cambridge API: {err}") from err
+            raise UpdateFailed(f"Error querying geocoding APIs: {err}") from err
 
-        if result is None:
+        if district is None:
             self._cached_data = SweepingData(in_cambridge=False)
             return self._cached_data
 
-        district = result.get("Sweep_District")
-        full_addr = result.get("Full_Addr", "")
-        street_num = self._street_number_from_address(full_addr)
-
-        if not district or street_num is None:
+        if house_number is None:
             self._cached_data = SweepingData(
-                in_cambridge=True, nearest_address=full_addr
+                district=district,
+                in_cambridge=True,
+                nearest_address=address,
             )
             return self._cached_data
 
-        side = "odd" if street_num % 2 == 1 else "even"
-        next_dt = get_next_sweep_date(district, street_num)
+        side = "odd" if house_number % 2 == 1 else "even"
+        next_dt = get_next_sweep_date(district, house_number)
 
         self._cached_data = SweepingData(
             district=district,
             side=side,
-            nearest_address=full_addr,
+            nearest_address=address,
             next_date=next_dt,
             schedule_expired=next_dt is None,
             in_cambridge=True,
         )
         return self._cached_data
+
+    def _refresh_next_date(self) -> None:
+        """Recompute next_date from cache (in case a day has passed)."""
+        data = self._cached_data
+        if not data.in_cambridge or not data.district or not data.nearest_address:
+            return
+        house_number = self._street_number_from_address(data.nearest_address)
+        if house_number is None:
+            return
+        next_dt = get_next_sweep_date(data.district, house_number)
+        data.next_date = next_dt
+        data.schedule_expired = next_dt is None
 
     @staticmethod
     def _street_number_from_address(address: str | None) -> int | None:

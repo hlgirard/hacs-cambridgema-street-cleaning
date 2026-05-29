@@ -7,9 +7,10 @@ A Home Assistant custom integration that tracks the next street sweeping date in
 ## How it works
 
 1. Monitors a `device_tracker` entity (e.g., your car) for GPS coordinates
-2. Queries the [City of Cambridge Master Address List](https://services1.arcgis.com/WnzC35krSYGuYov4/arcgis/rest/services/Master_Address_List_New/FeatureServer) to find the nearest address and its sweeping district
-3. Looks up the next scheduled sweeping date from the 2026 city schedule
-4. Exposes a sensor entity with the result
+2. Queries the [Cambridge Street Sweeping Districts](https://services1.arcgis.com/WnzC35krSYGuYov4/arcgis/rest/services/Street_Sweeping_Districts/FeatureServer) layer (point-in-polygon) to determine the sweeping district
+3. Reverse geocodes via [Nominatim/OpenStreetMap](https://nominatim.openstreetmap.org/) to get the street address and house number (for accurate odd/even side determination)
+4. Looks up the next scheduled sweeping date from the 2026 city schedule
+5. Exposes a sensor entity with the result
 
 ## Installation
 
@@ -57,6 +58,7 @@ The 2026 schedule is sourced from the [City of Cambridge DPW](https://www.cambri
 
 ## Data sources
 
-- **Address & District lookup:** [Cambridge GIS ArcGIS Feature Service](https://services1.arcgis.com/WnzC35krSYGuYov4/arcgis/rest/services/Master_Address_List_New/FeatureServer)
-- **District boundaries:** [cambridgegis/cambridgegis_data_dpw](https://github.com/cambridgegis/cambridgegis_data_dpw)
+- **District lookup (point-in-polygon):** [Cambridge Street Sweeping Districts Feature Service](https://services1.arcgis.com/WnzC35krSYGuYov4/arcgis/rest/services/Street_Sweeping_Districts/FeatureServer)
+- **Reverse geocoding (street + house number):** [Nominatim / OpenStreetMap](https://nominatim.openstreetmap.org/)
+- **District boundaries GeoJSON:** [cambridgegis/cambridgegis_data_dpw](https://github.com/cambridgegis/cambridgegis_data_dpw)
 - **Schedule PDF:** [cambridgema.gov/services/streetcleaning](https://www.cambridgema.gov/services/streetcleaning)
