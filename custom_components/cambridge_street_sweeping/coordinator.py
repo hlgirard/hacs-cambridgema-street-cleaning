@@ -7,7 +7,9 @@ from datetime import date, timedelta
 
 import requests
 
-from homeassistant.core import HomeAssistant
+from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
@@ -20,6 +22,8 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+UNRESOLVED_STATES = {STATE_UNKNOWN, STATE_UNAVAILABLE, None}
 
 
 @dataclass
@@ -132,6 +136,29 @@ class SweepingCoordinator(DataUpdateCoordinator[SweepingData]):
         self._last_lat: float | None = None
         self._last_lon: float | None = None
         self._cached_data: SweepingData = SweepingData()
+        self._unsub_state_listener: callback | None = None
+
+    async def async_setup(self) -> None:
+        """Subscribe to device tracker state changes."""
+        @callback
+        def _async_on_state_change(event) -> None:
+            new_state = event.data.get("new_state")
+            old_state = event.data.get("old_state")
+            # Trigger refresh when tracker transitions from unavailable/unknown to a real state
+            old_s = old_state.state if old_state else None
+            if old_s in UNRESOLVED_STATES and new_state and new_state.state not in UNRESOLVED_STATES:
+                self.hass.async_create_task(self.async_request_refresh())
+
+        self._unsub_state_listener = async_track_state_change_event(
+            self.hass, [self._entity_id], _async_on_state_change
+        )
+
+    async def async_shutdown(self) -> None:
+        """Unsubscribe from state changes."""
+        if self._unsub_state_listener:
+            self._unsub_state_listener()
+            self._unsub_state_listener = None
+        await super().async_shutdown()
 
     async def _async_update_data(self) -> SweepingData:
         """Fetch data from the device tracker and query the APIs."""

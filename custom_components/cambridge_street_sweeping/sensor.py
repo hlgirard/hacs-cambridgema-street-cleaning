@@ -16,6 +16,7 @@ async def async_setup_entry(
     """Set up the sensor from a config entry."""
     entity_id = entry.data[CONF_DEVICE_TRACKER]
     coordinator = SweepingCoordinator(hass, entity_id)
+    await coordinator.async_setup()
     await coordinator.async_config_entry_first_refresh()
     async_add_entities([CambridgeSweepingSensor(coordinator, entry)])
 
