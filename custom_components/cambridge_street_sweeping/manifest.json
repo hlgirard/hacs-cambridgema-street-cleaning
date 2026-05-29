@@ -1,0 +1,11 @@
+{
+  "domain": "cambridge_street_sweeping",
+  "name": "Cambridge Street Sweeping",
+  "codeowners": ["@henrigirard"],
+  "config_flow": true,
+  "documentation": "https://github.com/henrigirard/cambridge_street_sweeping",
+  "issue_tracker": "https://github.com/henrigirard/cambridge_street_sweeping/issues",
+  "iot_class": "cloud_polling",
+  "version": "0.1.0",
+  "requirements": ["requests>=2.28.0"]
+}
