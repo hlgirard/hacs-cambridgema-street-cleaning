@@ -1,0 +1,16 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Cambridge Street Sweeping",
+        "description": "Select the device tracker entity (e.g., your car) to monitor for street sweeping schedule lookups.",
+        "data": {
+          "device_tracker_entity": "Device tracker entity"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "This device tracker is already configured."
+    }
+  }
+}
