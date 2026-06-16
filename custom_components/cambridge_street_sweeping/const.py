@@ -13,6 +13,16 @@ SWEEPING_DISTRICTS_URL = (
     "Street_Sweeping_Districts/FeatureServer/0/query"
 )
 
+CENTERLINE_URL = (
+    "https://services1.arcgis.com/WnzC35krSYGuYov4/ArcGIS/rest/services/"
+    "Centerline_Web/FeatureServer/0/query"
+)
+
+MASTER_ADDRESS_LIST_URL = (
+    "https://services1.arcgis.com/WnzC35krSYGuYov4/ArcGIS/rest/services/"
+    "Master_Address_List_New/FeatureServer/0/query"
+)
+
 UPDATE_INTERVAL_MINUTES = 30
 
 # Minimum distance (meters) the car must move before we re-query the APIs.
@@ -65,7 +75,7 @@ def get_next_sweep_date(
             sweep_date = date(SCHEDULE_YEAR, month, day)
         except ValueError:
             continue
-        if sweep_date > after:
+        if sweep_date >= after:
             return sweep_date
 
     return None
