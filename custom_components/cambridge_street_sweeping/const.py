@@ -75,7 +75,7 @@ def get_next_sweep_date(
             sweep_date = date(SCHEDULE_YEAR, month, day)
         except ValueError:
             continue
-        if sweep_date > after:
+        if sweep_date >= after:
             return sweep_date
 
     return None
