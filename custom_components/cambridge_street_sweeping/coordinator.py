@@ -13,7 +13,9 @@ from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
+    CENTERLINE_URL,
     DOMAIN,
+    MASTER_ADDRESS_LIST_URL,
     MIN_MOVEMENT_METERS,
     NOMINATIM_URL,
     SWEEPING_DISTRICTS_URL,
@@ -103,6 +105,216 @@ def _query_sweep_district(lat: float, lon: float) -> str | None:
     return features[0]["attributes"].get("District")
 
 
+def _clean_street_name(name: str | None) -> str:
+    if not name:
+        return ""
+    parts = name.strip().split()
+    if not parts:
+        return ""
+    suffix_map = {
+        "road": "Rd",
+        "rd": "Rd",
+        "street": "St",
+        "st": "St",
+        "avenue": "Ave",
+        "ave": "Ave",
+        "terrace": "Ter",
+        "ter": "Ter",
+        "place": "Pl",
+        "pl": "Pl",
+        "court": "Ct",
+        "ct": "Ct",
+        "parkway": "Pkwy",
+        "pkwy": "Pkwy",
+        "square": "Sq",
+        "sq": "Sq",
+    }
+    last_lower = parts[-1].lower()
+    if last_lower in suffix_map:
+        parts[-1] = suffix_map[last_lower]
+    return " ".join(parts)
+
+
+def _distance_point_to_line_segment(
+    px: float, py: float, x1: float, y1: float, x2: float, y2: float
+) -> tuple[float, float]:
+    dx = x2 - x1
+    dy = y2 - y1
+    if dx == 0 and dy == 0:
+        return math.hypot(px - x1, py - y1), 0.0
+    t = ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)
+    t = max(0.0, min(1.0, t))
+    closest_x = x1 + t * dx
+    closest_y = y1 + t * dy
+    return math.hypot(px - closest_x, py - closest_y), t
+
+
+def _determine_side_of_centerline(px: float, py: float, path: list[list[float]]) -> str:
+    min_dist = float("inf")
+    best_segment = None
+    for i in range(len(path) - 1):
+        x1, y1 = path[i]
+        x2, y2 = path[i + 1]
+        dist, _ = _distance_point_to_line_segment(px, py, x1, y1, x2, y2)
+        if dist < min_dist:
+            min_dist = dist
+            best_segment = (x1, y1, x2, y2)
+
+    if best_segment is None:
+        return "unknown"
+
+    x1, y1, x2, y2 = best_segment
+    dx = x2 - x1
+    dy = y2 - y1
+    vx = px - x1
+    vy = py - y1
+    cross_product = dx * vy - dy * vx
+    return "left" if cross_product > 0 else "right"
+
+
+def _refine_side_of_street(lat: float, lon: float, nominatim: dict) -> dict | None:
+    """Refine side of street using Cambridge Centerline and Master Address layers."""
+    road = nominatim.get("road")
+    if not road:
+        return None
+
+    cleaned_road = _clean_street_name(road).lower()
+
+    # Query Centerline Web layer by geometry (within 50 meters)
+    params = {
+        "geometry": f"{lon},{lat}",
+        "geometryType": "esriGeometryPoint",
+        "spatialRel": "esriSpatialRelIntersects",
+        "distance": 50,
+        "units": "esriSRUnit_Meter",
+        "inSR": 4326,
+        "outSR": 4326,
+        "outFields": "Street,OBJECTID",
+        "returnGeometry": "true",
+        "f": "json",
+    }
+    try:
+        resp = requests.get(CENTERLINE_URL, params=params, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as err:
+        _LOGGER.warning("Error querying Centerline Web layer: %s", err)
+        return None
+
+    features = data.get("features", [])
+    matching_cl = None
+    for feat in features:
+        street_name = feat.get("attributes", {}).get("Street")
+        if _clean_street_name(street_name).lower() == cleaned_road:
+            matching_cl = feat
+            break
+
+    if not matching_cl:
+        _LOGGER.info("No matching centerline found for road '%s'", road)
+        return None
+
+    cl_name = matching_cl.get("attributes", {}).get("Street")
+    paths = matching_cl.get("geometry", {}).get("paths", [])
+    if not paths or not paths[0]:
+        return None
+    path = paths[0]
+
+    # Determine which side of centerline target is on
+    target_side = _determine_side_of_centerline(lon, lat, path)
+    if target_side == "unknown":
+        return None
+
+    # Query Master Address List for addresses on this street
+    addr_params = {
+        "where": f"StName = '{cl_name}'",
+        "outFields": "StNm,StName,Full_Addr,Sweep_District,lat,lon",
+        "returnGeometry": "true",
+        "outSR": 4326,
+        "f": "json",
+    }
+    try:
+        resp = requests.get(MASTER_ADDRESS_LIST_URL, params=addr_params, timeout=10)
+        resp.raise_for_status()
+        addr_data = resp.json()
+    except Exception as err:
+        _LOGGER.warning("Error querying Master Address List: %s", err)
+        return None
+
+    addr_features = addr_data.get("features", [])
+    if not addr_features:
+        return None
+
+    left_odds = 0
+    left_evens = 0
+    right_odds = 0
+    right_evens = 0
+
+    left_addresses = []
+    right_addresses = []
+
+    for feat in addr_features:
+        attrs = feat.get("attributes", {})
+        a_lon = attrs.get("lon") or feat.get("geometry", {}).get("x")
+        a_lat = attrs.get("lat") or feat.get("geometry", {}).get("y")
+        if a_lon is None or a_lat is None:
+            continue
+        a_side = _determine_side_of_centerline(a_lon, a_lat, path)
+        if a_side == "unknown":
+            continue
+
+        st_num_str = attrs.get("StNm", "")
+        # Parse house number
+        clean_num = "".join(c for c in st_num_str.split("-")[0] if c.isdigit())
+        if not clean_num:
+            continue
+        num = int(clean_num)
+        is_odd = (num % 2 == 1)
+
+        dist = _haversine_meters(lat, lon, a_lat, a_lon)
+        addr_info = {
+            "num": num,
+            "addr": attrs.get("Full_Addr"),
+            "lat": a_lat,
+            "lon": a_lon,
+            "dist": dist,
+            "is_odd": is_odd,
+        }
+
+        if a_side == "left":
+            left_addresses.append(addr_info)
+            if is_odd:
+                left_odds += 1
+            else:
+                left_evens += 1
+        elif a_side == "right":
+            right_addresses.append(addr_info)
+            if is_odd:
+                right_odds += 1
+            else:
+                right_evens += 1
+
+    # Determine parity of the target side
+    if target_side == "left":
+        target_parity = "odd" if left_odds > left_evens else "even"
+        candidates = left_addresses
+    else:
+        target_parity = "odd" if right_odds > right_evens else "even"
+        candidates = right_addresses
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda x: x["dist"])
+    nearest_match = candidates[0]
+
+    return {
+        "road": cl_name,
+        "house_number": nearest_match["num"],
+        "display": nearest_match["addr"],
+        "side": target_parity,
+    }
+
+
 def _resolve_location(lat: float, lon: float) -> tuple[str | None, str | None, int | None]:
     """
     Resolve GPS to (district, display_address, house_number).
@@ -117,6 +329,10 @@ def _resolve_location(lat: float, lon: float) -> tuple[str | None, str | None, i
     nominatim = _reverse_geocode_nominatim(lat, lon)
     if nominatim is None:
         return district, None, None
+
+    refined = _refine_side_of_street(lat, lon, nominatim)
+    if refined:
+        return district, refined["display"], refined["house_number"]
 
     return district, nominatim["display"], nominatim["house_number"]
 
