@@ -1,7 +1,7 @@
 {
   "domain": "cambridge_street_sweeping",
   "name": "Cambridge Street Sweeping",
-  "codeowners": ["@henrigirard"],
+  "codeowners": ["@hlgirard"],
   "config_flow": true,
   "documentation": "https://github.com/henrigirard/cambridge_street_sweeping",
   "issue_tracker": "https://github.com/henrigirard/cambridge_street_sweeping/issues",
