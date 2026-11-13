@@ -69,13 +69,18 @@ def _reverse_geocode_nominatim(lat: float, lon: float) -> dict | None:
     if "cambridge" not in city.lower():
         return None
 
+    road = address.get("road", "")
+    if not road:
+        return None
+
     house_number_raw = address.get("house_number", "")
     # Nominatim may return "76;78" for interpolated addresses — take the first
     house_number = house_number_raw.split(";")[0].strip()
-    road = address.get("road", "")
 
     if not house_number or not house_number.isdigit():
-        return None
+        # No usable house number (e.g. parking lot): keep the road so the
+        # side of street can still be refined from the Cambridge layers.
+        return {"house_number": None, "road": road, "display": road}
 
     return {
         "house_number": int(house_number),
@@ -320,7 +325,9 @@ def _resolve_location(lat: float, lon: float) -> tuple[str | None, str | None, i
     Resolve GPS to (district, display_address, house_number).
 
     Uses Nominatim for street/side and Cambridge Districts layer for district.
-    Returns (None, None, None) if not in Cambridge.
+    If Nominatim has no house number, the side is still refined from the road name.
+    Returns (None, None, None) if not in Cambridge; house_number is None when
+    it could not be determined.
     """
     district = _query_sweep_district(lat, lon)
     if district is None:
