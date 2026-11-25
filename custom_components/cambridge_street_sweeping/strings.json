@@ -2,15 +2,42 @@
   "config": {
     "step": {
       "user": {
-        "title": "Cambridge Street Sweeping",
-        "description": "Select the device tracker entity (e.g., your car) to monitor for street sweeping schedule lookups.",
+        "title": "Cambridge Street Cleaning",
+        "description": "Select the device tracker (for example, your car) whose location is used to look up the street cleaning schedule.",
         "data": {
-          "device_tracker_entity": "Device tracker entity"
+          "device_tracker_entity": "Device tracker"
+        },
+        "data_description": {
+          "device_tracker_entity": "A device tracker that reports GPS latitude and longitude."
+        }
+      },
+      "reconfigure": {
+        "title": "Change tracked device",
+        "description": "Select a different device tracker to use for street cleaning lookups.",
+        "data": {
+          "device_tracker_entity": "Device tracker"
+        },
+        "data_description": {
+          "device_tracker_entity": "A device tracker that reports GPS latitude and longitude."
         }
       }
     },
     "abort": {
-      "already_configured": "This device tracker is already configured."
+      "already_configured": "This device tracker is already configured.",
+      "reconfigure_successful": "The device tracker was updated."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "next_cleaning": {
+        "name": "Next street cleaning"
+      }
+    }
+  },
+  "issues": {
+    "schedule_expired": {
+      "title": "Street cleaning schedule has run out",
+      "description": "The built-in Cambridge street cleaning schedule for {year} has no remaining dates. The sensor will show no date until the integration is updated with the next year's schedule. Check HACS for an update."
     }
   }
 }

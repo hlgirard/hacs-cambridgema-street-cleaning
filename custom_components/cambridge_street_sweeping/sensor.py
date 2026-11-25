@@ -1,74 +1,76 @@
-"""Sensor platform for Cambridge Street Sweeping."""
+"""Sensor platform for Cambridge Street Cleaning."""
+
+from __future__ import annotations
 
 from datetime import date
+from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_DEVICE_TRACKER
-from .coordinator import SweepingCoordinator, SweepingData
+from .const import DOMAIN
+from .coordinator import CambridgeStreetCleaningConfigEntry, StreetCleaningCoordinator
+
+PARALLEL_UPDATES = 0
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+    hass: HomeAssistant,
+    entry: CambridgeStreetCleaningConfigEntry,
+    async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the sensor from a config entry."""
-    entity_id = entry.data[CONF_DEVICE_TRACKER]
-    coordinator = SweepingCoordinator(hass, entity_id)
-    await coordinator.async_setup()
-    await coordinator.async_config_entry_first_refresh()
-    async_add_entities([CambridgeSweepingSensor(coordinator, entry)])
+    async_add_entities([CambridgeStreetCleaningSensor(entry.runtime_data)])
 
 
-class CambridgeSweepingSensor(CoordinatorEntity[SweepingCoordinator], SensorEntity):
-    """Sensor showing next street sweeping date."""
+class CambridgeStreetCleaningSensor(CoordinatorEntity[StreetCleaningCoordinator], SensorEntity):
+    """Sensor showing the next street cleaning date."""
 
     _attr_has_entity_name = True
-    _attr_name = "Next Street Sweeping"
+    _attr_translation_key = "next_cleaning"
     _attr_device_class = SensorDeviceClass.DATE
 
-    def __init__(self, coordinator: SweepingCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: StreetCleaningCoordinator) -> None:
         """Initialize."""
         super().__init__(coordinator)
+        entry = coordinator.config_entry
+        # Unique ID kept from 0.2.x so existing entity IDs are preserved.
         self._attr_unique_id = f"{entry.entry_id}_next_sweep"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry.entry_id)},
+            entry_type=DeviceEntryType.SERVICE,
+            manufacturer="City of Cambridge",
+            name=entry.title,
+        )
 
     @property
     def native_value(self) -> date | None:
-        """Return the next sweeping date, or None."""
-        data: SweepingData = self.coordinator.data
-        if not data.in_cambridge:
-            return None
-        if data.schedule_expired:
-            return None
-        return data.next_date
+        """Return the next cleaning date, or None."""
+        return self.coordinator.data.next_date
 
     @property
-    def icon(self) -> str:
-        """Return icon based on state."""
-        data: SweepingData = self.coordinator.data
-        if data.schedule_expired:
+    def icon(self) -> str | None:
+        """Show a warning icon when the schedule has run out."""
+        if self.coordinator.data.schedule_expired:
             return "mdi:alert"
-        return "mdi:broom"
-
-    @property
-    def entity_picture(self) -> str | None:
-        """Not used — rely on icon instead."""
+        # Fall back to the icon translation in icons.json.
         return None
 
     @property
-    def extra_state_attributes(self) -> dict[str, str | None]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional attributes."""
-        data: SweepingData = self.coordinator.data
-        attrs: dict[str, str | None] = {
+        data = self.coordinator.data
+        attrs: dict[str, Any] = {
             "district": data.district,
             "side": data.side,
             "nearest_address": data.nearest_address,
-            "in_cambridge": str(data.in_cambridge),
-            "schedule_expired": str(data.schedule_expired),
+            "in_cambridge": data.in_cambridge,
+            "schedule_expired": data.schedule_expired,
         }
         if data.next_date:
+            # Attribute name kept from 0.2.x for template compatibility.
             attrs["next_sweep_formatted"] = data.next_date.strftime("%A, %B %d, %Y")
         return attrs

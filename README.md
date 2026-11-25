@@ -1,16 +1,16 @@
-# Cambridge Street Sweeping
+# Cambridge Street Cleaning
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 
-A Home Assistant custom integration that tracks the next street sweeping date in Cambridge, MA based on a GPS-tracked vehicle's location.
+A Home Assistant custom integration that tracks the next street cleaning date in Cambridge, MA based on a GPS-tracked vehicle's location.
 
 ## How it works
 
 1. Monitors a `device_tracker` entity (e.g., your car) for GPS coordinates.
-2. Queries the [Cambridge Street Sweeping Districts](https://services1.arcgis.com/WnzC35krSYGuYov4/arcgis/rest/services/Street_Sweeping_Districts/FeatureServer) layer (point-in-polygon) to determine the sweeping district.
+2. Queries the [Cambridge street cleaning districts](https://services1.arcgis.com/WnzC35krSYGuYov4/arcgis/rest/services/Street_Sweeping_Districts/FeatureServer) layer (point-in-polygon) to determine the cleaning district.
 3. Reverse geocodes via [Nominatim/OpenStreetMap](https://nominatim.openstreetmap.org/) to get the street name.
-4. Refines the side-of-street resolution by determining the car's position relative to the street's centerline (queried from the Cambridge GIS `Centerline_Web` layer) and mapping the target side (left/right) to the correct odd/even parity using nearby address points (from the Cambridge `Master_Address_List_New` layer). This ensures highly accurate side resolution even when the closest Nominatim address point is on the opposite side of the street.
-5. Looks up the next scheduled sweeping date from the 2026 city schedule, inclusive of today (so the sensor state shows today's date when a sweep is scheduled on the day of).
+4. Refines the side-of-street resolution by determining the car's position relative to the street's centerline (queried from the Cambridge GIS `Centerline_Web` layer) and mapping that side (left/right) to odd/even using the majority parity of the address points on that side (from the Cambridge `Master_Address_List_New` layer). This ensures highly accurate side resolution even when the closest Nominatim address point is on the opposite side of the street.
+5. Looks up the next scheduled cleaning date from the 2026 city schedule, inclusive of today (so the sensor state shows today's date when cleaning is scheduled that day).
 6. Exposes a sensor entity with the result.
 
 ## Installation
@@ -31,24 +31,26 @@ Copy the `custom_components/cambridge_street_sweeping` directory into your Home 
 ## Configuration
 
 1. Go to **Settings** > **Devices & Services** > **Add Integration**
-2. Search for "Cambridge Street Sweeping"
+2. Search for "Cambridge Street Cleaning"
 3. Select the `device_tracker` entity for your vehicle
+
+To track a different vehicle later, open the integration entry and choose **Reconfigure**.
 
 ## Sensor
 
-The integration creates a sensor entity with:
+The integration creates a service device with a **Next street cleaning** sensor:
 
 | Property | Description |
 |----------|-------------|
-| **State** | Next sweeping date (e.g. `2026-06-01`) or unavailable if outside Cambridge / schedule expired |
-| `district` | Sweeping district letter (A-K) |
-| `side` | `odd` or `even` (based on nearest street number) |
+| **State** | Next cleaning date (e.g. `2026-06-01`), or `unknown` when outside Cambridge, the side of the street can't be determined, or the schedule has expired |
+| `district` | Cleaning district letter (A-K) |
+| `side` | `odd` or `even` side of the street |
 | `nearest_address` | Closest Cambridge address to GPS position |
 | `next_sweep_formatted` | Human-readable date (e.g. "Monday, June 01, 2026") |
-| `in_cambridge` | Whether the vehicle is currently in Cambridge |
-| `schedule_expired` | `True` when the hardcoded calendar has no future dates |
+| `in_cambridge` | `true` when the vehicle is currently in Cambridge |
+| `schedule_expired` | `true` when the built-in calendar has no future dates |
 
-The sensor uses `device_class: date` so tile cards render it as a friendly date. The icon switches from `mdi:broom` (green) to `mdi:alert` (orange) when the schedule is expired.
+The sensor uses `device_class: date` so tile cards render it as a friendly date. The icon switches from `mdi:broom` to `mdi:alert` when the schedule has expired, and a repair issue appears under **Settings** > **System** > **Repairs**.
 
 ## Dashboard card
 
@@ -56,36 +58,47 @@ A simple tile card works out of the box:
 
 ```yaml
 type: tile
-entity: sensor.next_street_sweeping
+entity: sensor.street_cleaning_car_next_street_cleaning
 ```
 
-To conditionally color the tile based on schedule state, use a [card-mod](https://github.com/thomasloven/lovelace-card-mod) style or a conditional card:
+The entity ID depends on your config entry title; check it under **Settings** > **Entities**. To conditionally color the tile based on schedule state, use a [card-mod](https://github.com/thomasloven/lovelace-card-mod) style or a conditional card:
 
 ```yaml
 type: conditional
 conditions:
   - condition: state
-    entity: sensor.next_street_sweeping
-    state_not: unavailable
+    entity: sensor.street_cleaning_car_next_street_cleaning
+    state_not: unknown
 card:
   type: tile
-  entity: sensor.next_street_sweeping
+  entity: sensor.street_cleaning_car_next_street_cleaning
   color: green
 ```
+
+## Development
+
+```bash
+pip install -r requirements_test.txt
+ruff check . && ruff format --check .
+pytest
+```
+
+The integration icon in `custom_components/cambridge_street_sweeping/brand/` is generated by `scripts/make_icon.py` (needs Pillow): `python scripts/make_icon.py custom_components/cambridge_street_sweeping/brand`. Home Assistant 2026.3 and newer show it automatically; older versions show a generic icon.
 
 ## Update behavior
 
 - Polls the GPS entity every **30 minutes**
 - Only re-queries the Cambridge API if the vehicle has moved more than **50 meters**
-- When stationary, still recalculates the next date (in case a sweep date has passed)
+- When stationary, still recalculates the next date (in case a cleaning date has passed)
+- Refreshes right away when the tracker comes back from `unavailable`/`unknown`
 
 ## Schedule data
 
-The 2026 schedule is sourced from the [City of Cambridge DPW](https://www.cambridgema.gov/services/streetcleaning). When the schedule expires (all dates passed), the sensor becomes unavailable with a `schedule_expired: True` attribute and the icon switches to a warning indicator.
+The 2026 schedule is sourced from the [City of Cambridge DPW](https://www.cambridgema.gov/services/streetcleaning). When the schedule expires (all dates passed), the sensor state becomes `unknown` with `schedule_expired: true`, the icon switches to a warning, and a repair issue is raised until an update ships the next year's schedule.
 
 ## Data sources
 
-- **District lookup (point-in-polygon):** [Cambridge Street Sweeping Districts Feature Service](https://services1.arcgis.com/WnzC35krSYGuYov4/arcgis/rest/services/Street_Sweeping_Districts/FeatureServer)
+- **District lookup (point-in-polygon):** [Cambridge Street Sweeping Districts Feature Service (city GIS layer name)](https://services1.arcgis.com/WnzC35krSYGuYov4/arcgis/rest/services/Street_Sweeping_Districts/FeatureServer)
 - **Street centerlines:** [Cambridge Centerline Web Feature Service](https://services1.arcgis.com/WnzC35krSYGuYov4/ArcGIS/rest/services/Centerline_Web/FeatureServer)
 - **Address points:** [Cambridge Master Address List Feature Service](https://services1.arcgis.com/WnzC35krSYGuYov4/ArcGIS/rest/services/Master_Address_List_New/FeatureServer)
 - **Reverse geocoding (street + house number):** [Nominatim / OpenStreetMap](https://nominatim.openstreetmap.org/)
