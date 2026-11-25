@@ -1,0 +1,9 @@
+{
+  "entity": {
+    "sensor": {
+      "next_cleaning": {
+        "default": "mdi:broom"
+      }
+    }
+  }
+}
