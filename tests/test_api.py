@@ -106,6 +106,45 @@ async def test_refine_side_uses_majority_parity_of_target_side(hass, aioclient_m
     assert result == {"display": "117 Trowbridge St", "side": "odd"}
 
 
+async def test_refine_side_uses_nearest_part_of_multipart_centerline(hass, aioclient_mock):
+    """Trowbridge St is a two-part polyline; the car is next to the second part."""
+    centerline = {
+        "features": [
+            {
+                "attributes": {"Street": "Trowbridge St"},
+                "geometry": {
+                    "paths": [
+                        [[-71.1131332, 42.3700126], [-71.1108367, 42.3732048]],
+                        [[-71.1100606, 42.3749271], [-71.1093938, 42.3776380]],
+                    ]
+                },
+            }
+        ]
+    }
+    addresses = {
+        "features": [
+            {"attributes": {"StNm": n, "Full_Addr": f"{n} Trowbridge St", "lat": la, "lon": lo}}
+            for n, la, lo in [
+                ("124", 42.37748, -71.10924),
+                ("122", 42.37728, -71.10929),
+                ("118", 42.37712, -71.10934),
+                ("131", 42.37741, -71.10966),
+                ("127", 42.37721, -71.10972),
+                # Far away and on the other part: must not vote.
+                ("55", 42.37301, -71.11120),
+                ("53", 42.37290, -71.11128),
+                ("51", 42.37279, -71.11136),
+            ]
+        ]
+    }
+    aioclient_mock.get(CENTERLINE_URL, json=centerline)
+    aioclient_mock.get(MASTER_ADDRESS_LIST_URL, json=addresses)
+    result = await api.refine_side_of_street(
+        async_get_clientsession(hass), 42.37753, -71.1094067, "Trowbridge Street"
+    )
+    assert result == {"display": "124 Trowbridge St", "side": "even"}
+
+
 async def test_refine_side_escapes_quotes_in_where_clause(hass, aioclient_mock):
     centerline = {
         "features": [

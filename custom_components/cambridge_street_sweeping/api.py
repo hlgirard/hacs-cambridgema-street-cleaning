@@ -14,6 +14,7 @@ from .const import (
     CENTERLINE_URL,
     CLEANING_DISTRICTS_URL,
     MASTER_ADDRESS_LIST_URL,
+    MAX_ADDRESS_DISTANCE_METERS,
     NOMINATIM_URL,
     REQUEST_TIMEOUT_SECONDS,
     USER_AGENT,
@@ -161,15 +162,22 @@ def _distance_point_to_line_segment(
     return math.hypot(px - (x1 + t * dx), py - (y1 + t * dy))
 
 
-def determine_side_of_centerline(px: float, py: float, path: list[list[float]]) -> str | None:
-    """Return "left" or "right" of the closest centerline segment, or None."""
+def determine_side_of_centerline(
+    px: float, py: float, paths: list[list[list[float]]]
+) -> str | None:
+    """Return "left" or "right" of the closest centerline segment, or None.
+
+    ``paths`` holds every polyline of the centerline: the city's features are
+    often multi-part, and the part nearest the point may not be the first.
+    """
     best_segment = None
     min_dist = float("inf")
-    for (x1, y1), (x2, y2) in pairwise(path):
-        dist = _distance_point_to_line_segment(px, py, x1, y1, x2, y2)
-        if dist < min_dist:
-            min_dist = dist
-            best_segment = (x1, y1, x2, y2)
+    for path in paths:
+        for (x1, y1), (x2, y2) in pairwise(path):
+            dist = _distance_point_to_line_segment(px, py, x1, y1, x2, y2)
+            if dist < min_dist:
+                min_dist = dist
+                best_segment = (x1, y1, x2, y2)
 
     if best_segment is None:
         return None
@@ -206,25 +214,26 @@ async def refine_side_of_street(
         _LOGGER.warning("Error querying Centerline Web layer: %s", err)
         return None
 
-    matching_cl = next(
-        (
-            feat
-            for feat in data.get("features", [])
-            if clean_street_name(feat.get("attributes", {}).get("Street")).lower() == cleaned_road
-        ),
-        None,
-    )
-    if matching_cl is None:
+    matching = [
+        feat
+        for feat in data.get("features", [])
+        if clean_street_name(feat.get("attributes", {}).get("Street")).lower() == cleaned_road
+    ]
+    if not matching:
         _LOGGER.debug("No matching centerline found for road '%s'", road)
         return None
 
-    cl_name = matching_cl["attributes"]["Street"]
-    paths = matching_cl.get("geometry", {}).get("paths", [])
-    if not paths or not paths[0]:
+    cl_name = matching[0]["attributes"]["Street"]
+    paths = [
+        path
+        for feat in matching
+        for path in feat.get("geometry", {}).get("paths", [])
+        if len(path) >= 2
+    ]
+    if not paths:
         return None
-    path = paths[0]
 
-    target_side = determine_side_of_centerline(lon, lat, path)
+    target_side = determine_side_of_centerline(lon, lat, paths)
     if target_side is None:
         return None
 
@@ -252,7 +261,12 @@ async def refine_side_of_street(
         a_lat = attrs.get("lat") or geometry.get("y")
         if a_lon is None or a_lat is None:
             continue
-        if determine_side_of_centerline(a_lon, a_lat, path) != target_side:
+        distance = haversine_meters(lat, lon, a_lat, a_lon)
+        # The centerline only covers the stretch near the car; farther
+        # addresses would be compared against extrapolated segments.
+        if distance > MAX_ADDRESS_DISTANCE_METERS:
+            continue
+        if determine_side_of_centerline(a_lon, a_lat, paths) != target_side:
             continue
 
         st_num = str(attrs.get("StNm") or "")
@@ -263,7 +277,7 @@ async def refine_side_of_street(
             odds += 1
         else:
             evens += 1
-        candidates.append((haversine_meters(lat, lon, a_lat, a_lon), attrs.get("Full_Addr")))
+        candidates.append((distance, attrs.get("Full_Addr")))
 
     if not candidates:
         return None
