@@ -6,7 +6,7 @@ DOMAIN: Final = "cambridge_street_sweeping"
 
 CONF_DEVICE_TRACKER: Final = "device_tracker_entity"
 
-VERSION: Final = "0.3.0"
+VERSION: Final = "0.3.1"
 REPO_URL: Final = "https://github.com/hlgirard/hacs-cambridgema-street-cleaning"
 USER_AGENT: Final = f"HA-CambridgeStreetCleaning/{VERSION} (+{REPO_URL})"
 
@@ -34,5 +34,8 @@ UPDATE_INTERVAL_MINUTES: Final = 30
 MIN_MOVEMENT_METERS: Final = 50
 
 REQUEST_TIMEOUT_SECONDS: Final = 10
+
+# Only addresses this close to the car vote on the side of the street.
+MAX_ADDRESS_DISTANCE_METERS: Final = 150
 
 ISSUE_SCHEDULE_EXPIRED: Final = "schedule_expired"
